@@ -23,7 +23,7 @@ async def handle_list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="get-nhl-schedule",
-            description="Get NHL schedule for a date",
+            description="Get NHL schedule for a date, and get the corresponding game IDs",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -33,6 +33,15 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                 },
                 "required": ["date"],
+            },
+        ),
+        types.Tool(
+            name="get-nhl-schedule-now",
+            description="Get NHL schedule for right now",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
             },
         ),
         types.Tool(
@@ -47,18 +56,21 @@ async def handle_list_tools() -> list[types.Tool]:
     ]
 
 async def make_nhl_request(client: httpx.AsyncClient, url: str) -> dict[str, Any] | None:
-    """Make a request to the NHL API with proper error handling."""
+    """Make a request to the NHL API with proper error handling, including following 307 redirects."""
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/json"
     }
 
     try:
-        response = await client.get(url, headers=headers, timeout=30.0)
+        # Enable following of redirects
+        response = await client.get(url, headers=headers, timeout=30.0, follow_redirects=True)
         response.raise_for_status()
         return response.json()
-    except Exception:
+    except Exception as e:
+        print(f"Request failed: {e}")
         return None
+
 
 def format_games(games: list[dict]) -> str:
     """Format a list of games into a concise string."""
@@ -140,6 +152,34 @@ async def handle_call_tool(
                 types.TextContent(
                     type="text",
                     text=f"No active games for {date}"
+                )
+            ]
+    elif name == "get-nhl-schedule-now":
+        async with httpx.AsyncClient() as client:
+            schedule_url = f"{NHL_API_BASE}/schedule/now"
+            schedule_data = await make_nhl_request(client, schedule_url)
+
+            if not schedule_data:
+                return [types.TextContent(type="text", text="Failed to retrieve alerts data")]
+
+            game_days = schedule_data.get("gameWeek", [])
+            if not game_days:
+                return [types.TextContent(type="text", text=f"No active games")]
+
+            for game_day in game_days:
+                if game_day.get("date", "") == date:
+                    games = game_day.get("games", [])
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=format_games(games)
+                        )
+                    ]
+
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"No active games right now"
                 )
             ]
     elif name == "get-nhl-standings":
