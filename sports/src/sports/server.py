@@ -71,15 +71,6 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name="get-nhl-standings",
-            description="Get NHL standings",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        ),
-        types.Tool(
             name="get-nhl-roster",
             description="Get NHL roster for a team",
             inputSchema={
