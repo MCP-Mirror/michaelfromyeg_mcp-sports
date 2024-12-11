@@ -8,13 +8,13 @@ Connect to this server via.
 // MacOS
 {
     "mcpServers": {
-        "weather": {
+        "nhl": {
             "command": "uv",
             "args": [
                 "--directory",
-                "/ABSOLUTE/PATH/TO/PARENT/FOLDER/weather",
+                "/ABSOLUTE/PATH/TO/PARENT/FOLDER/nhl",
                 "run",
-                "weather"
+                "nhl"
             ]
         }
     }
@@ -22,13 +22,13 @@ Connect to this server via.
 // Windows
 {
     "mcpServers": {
-        "weather": {
+        "nhl": {
             "command": "uv",
             "args": [
                 "--directory",
-                "C:\\ABSOLUTE\PATH\TO\PARENT\FOLDER\weather",
+                "C:\\ABSOLUTE\PATH\TO\PARENT\FOLDER\nhl",
                 "run",
-                "weather"
+                "nhl"
             ]
         }
     }
