@@ -91,6 +91,32 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                 },
             },
+        ),
+        # types.Tool(
+        #     name="get-nhl-team-stats",
+        #     description="Get NHL team stats",
+        #     inputSchema={
+        #         "type": "object",
+        #         "properties": {
+        #             "team_abbreviation": {
+        #                 "type": "string",
+        #                 "description": "An NHL team abbreviation",
+        #             },
+        #         },
+        #     },
+        # ),
+        types.Tool(
+            name="get-nhl-player-stats",
+            description="Get NHL player stats",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "player_id": {
+                        "type": "string",
+                        "description": "An NHL player ID",
+                    },
+                },
+            },
         )
     ]
 
@@ -228,6 +254,42 @@ def format_roster(roster: dict) -> str:
         roster_str += f"#{number} {first_name} {last_name}\n"
     return roster_str
 
+def format_player_stats(player_data: dict) -> str:
+    return str(player_data)
+
+    """Format NHL player stats into a concise string."""
+    # Get basic player info
+    name = f"{player_data.get('firstName', {}).get('default', '')} {player_data.get('lastName', {}).get('default', '')}"
+    team = player_data.get('teamCommonName', {}).get('default', '')
+    position = player_data.get('position', '')
+    number = player_data.get('sweaterNumber', '')
+
+    # Get current season stats
+    current_season = player_data.get('featuredStats', {}).get('regularSeason', {}).get('subSeason', {})
+    games = current_season.get('gamesPlayed', 0)
+    goals = current_season.get('goals', 0)
+    assists = current_season.get('assists', 0)
+    points = current_season.get('points', 0)
+    plus_minus = current_season.get('plusMinus', 0)
+
+    # Format output
+    stats = f"#{number} {name} ({position}) - {team}\n"
+    stats += f"2024-25 Season Stats:\n"
+    stats += f"Games: {games}, Goals: {goals}, Assists: {assists}, Points: {points}, +/-: {plus_minus}\n\n"
+
+    # Add last 5 games
+    stats += "Last 5 Games:\n"
+    for game in player_data.get('last5Games', [])[:5]:
+        date = game.get('gameDate', '')
+        opp = game.get('opponentAbbrev', '')
+        g = game.get('goals', 0)
+        a = game.get('assists', 0)
+        p = game.get('points', 0)
+        pm = game.get('plusMinus', 0)
+        stats += f"{date} vs {opp}: {g}G, {a}A, {p}P, {pm:+d}\n"
+
+    return stats
+
 @server.call_tool()
 async def handle_call_tool(
     name: str, arguments: dict | None
@@ -347,6 +409,49 @@ async def handle_call_tool(
                 types.TextContent(
                     type="text",
                     text=format_standings(standings_data)
+                )
+            ]
+    # elif name == "get-nhl-team-stats":
+    #     # First, parse the arguments
+    #     if not arguments:
+    #         raise ValueError("Missing arguments")
+
+    #     team_abbreviation = arguments.get("team_abbreviation")
+    #     if not team_abbreviation:
+    #         raise ValueError("Missing team_abbreviation")
+        
+    #     # validate team_abbreviation
+    #     if team_abbreviation not in TEAM_ABBREVIATIONS:
+    #         raise ValueError(f"Invalid team abbreviation: {team_abbreviation}")
+        
+    #     # current season id, i.e., 20242025 
+    #     today = Date.today()
+    #     # NHL season starts in October, so if we're before October, use previous year
+    #     season_start_year = today.year if today.month >= 10 else today.year - 1
+    #     current_season_id = f"{season_start_year}{season_start_year + 1}"
+    #     roster_url = f"{NHL_API_BASE}/roster/{team_abbreviation}/{current_season_id}"
+    elif name == "get-nhl-player-stats":
+        # validate args
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        player_id = arguments.get("player_id")
+        if not player_id:
+            raise ValueError("Missing player_id")
+        
+        # query https://api-web.nhle.com/v1/player/8484145/landing
+
+        async with httpx.AsyncClient() as client:
+            player_url = f"{NHL_API_BASE}/player/{player_id}/landing"
+            player_data = await make_nhl_request(client, player_url)
+
+            if not player_data:
+                return [types.TextContent(type="text", text="Failed to retrieve player data")]
+
+            return [
+                types.TextContent(
+                    type="text",
+                    text=format_player_stats(player_data)
                 )
             ]
     else:
