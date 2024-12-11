@@ -14,6 +14,41 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 # "sports", eventually actually make it sports
 server = Server("sports")
 
+TEAM_ABBREVIATIONS = [
+    "ANA",
+    "BOS",
+    "BUF",
+    "CAR",
+    "CBJ",
+    "CGY",
+    "CHI",
+    "COL",
+    "DAL",
+    "DET",
+    "EDM",
+    "FLA",
+    "LAK",
+    "MIN",
+    "MTL",
+    "NJD",
+    "NSH",
+    "NYI",
+    "NYR",
+    "OTT",
+    "PHI",
+    "PIT",
+    "SEA",
+    "SJS",
+    "STL",
+    "TBL",
+    "TOR",
+    "UTA",
+    "VAN",
+    "VGK",
+    "WPG",
+    "WSH",
+]
+
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
     """
@@ -44,6 +79,19 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": [],
             },
         ),
+        types.Tool(
+            name="get-nhl-roster",
+            description="Get NHL roster for a team",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "team_abbreviation": {
+                        "type": "string",
+                        "description": "An NHL team abbreviation: one-of ANA (Mighty Ducks of Anaheim/Anaheim Ducks), BOS (Boston Bruins), BUF (Buffalo Sabres), CAR (Carolina Hurricanes), CBJ (Columbus Blue Jackets), CGY (Calgary Flames), CHI (Chicago Black Hawks/Blackhawks), COL (Colorado Avalanche), DAL (Dallas Stars), DET (Detroit Red Wings), EDM (Edmonton Oilers), FLA (Florida Panthers), LAK (Los Angeles Kings), MIN (Minnesota Wild), MTL (Montreal Canadiens), NJD (New Jersey Devils), NSH (Nashville Predators), NYI (New York Islanders), NYR (New York Rangers), OTT (Ottawa Senators), PHI (Philadelphia Flyers), PIT (Pittsburgh Penguins), SEA (Seattle Kraken), SJS (San Jose Sharks), STL (St. Louis Blues), TBL (Tampa Bay Lightning), TOR (Toronto Maple Leafs), UTA (Utah Hockey Club), VAN (Vancouver Canucks), VGK (Vegas Golden Knights), WPG (Winnipeg Jets), WSH (Washington Capitals)",
+                    },
+                },
+            },
+        )
     ]
 
 async def make_nhl_request(client: httpx.AsyncClient, url: str) -> dict[str, Any] | None:
@@ -94,6 +142,34 @@ def format_standings(standings: dict) -> str:
         standings_str += f"{team_name}: {points}pts ({wins}-{losses}-{ot_losses}) GD: {goal_diff:+d}\n"
     return standings_str
 
+def format_roster(roster: dict) -> str:
+    """Format NHL roster into a concise string."""
+    roster_str = ""
+    # Process forwards
+    roster_str += "FORWARDS:\n"
+    for player in roster.get("forwards", []):
+        first_name = player.get("firstName", {}).get("default", "")
+        last_name = player.get("lastName", {}).get("default", "")
+        number = player.get("sweaterNumber", "")
+        roster_str += f"#{number} {first_name} {last_name}\n"
+
+    # Process defensemen 
+    roster_str += "\nDEFENSEMEN:\n"
+    for player in roster.get("defensemen", []):
+        first_name = player.get("firstName", {}).get("default", "")
+        last_name = player.get("lastName", {}).get("default", "")
+        number = player.get("sweaterNumber", "")
+        roster_str += f"#{number} {first_name} {last_name}\n"
+
+    # Process goalies
+    roster_str += "\nGOALIES:\n" 
+    for player in roster.get("goalies", []):
+        first_name = player.get("firstName", {}).get("default", "")
+        last_name = player.get("lastName", {}).get("default", "")
+        number = player.get("sweaterNumber", "")
+        roster_str += f"#{number} {first_name} {last_name}\n"
+    return roster_str
+
 @server.call_tool()
 async def handle_call_tool(
     name: str, arguments: dict | None
@@ -142,6 +218,37 @@ async def handle_call_tool(
                     text=f"No active games for {date}"
                 )
             ]
+    elif name == "get-nhl-roster":
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        team_abbreviation = arguments.get("team_abbreviation")
+        if not team_abbreviation:
+            raise ValueError("Missing team_abbreviation")
+
+        # validate team_abbreviation
+        if team_abbreviation not in TEAM_ABBREVIATIONS:
+            raise ValueError(f"Invalid team abbreviation: {team_abbreviation}")
+        
+        # current season id, i.e., 20242025 
+        today = Date.today()
+        # NHL season starts in October, so if we're before October, use previous year
+        season_start_year = today.year if today.month >= 10 else today.year - 1
+        current_season_id = f"{season_start_year}{season_start_year + 1}"
+        roster_url = f"{NHL_API_BASE}/roster/{team_abbreviation}/{current_season_id}"
+
+        async with httpx.AsyncClient() as client:
+            roster_data = await make_nhl_request(client, roster_url)
+
+        if not roster_data:
+            return [types.TextContent(type="text", text="Failed to retrieve roster data")]
+        
+        return [
+            types.TextContent(
+                type="text",
+                text=format_roster(roster_data)
+            )
+        ]
     elif name == "get-nhl-standings":
         async with httpx.AsyncClient() as client:
             standings_url = f"{NHL_API_BASE}/standings/{Date.today().strftime('%Y-%m-%d')}"
