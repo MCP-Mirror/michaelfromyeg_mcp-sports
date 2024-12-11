@@ -58,7 +58,7 @@ async def handle_list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="get-nhl-schedule",
-            description="Get NHL schedule for a date, and get the corresponding game IDs",
+            description="Get NHL schedule for a date, and get the corresponding game information.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -68,6 +68,20 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                 },
                 "required": ["date"],
+            },
+        ),
+        types.Tool(
+            name="get-nhl-game-play-by-play",
+            description="Get NHL play by plays for a game. Get the game id from get-nhl-schedule tool.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "game_id": {
+                        "type": "string",
+                        "description": "Game ID. Example: 2024020451.",
+                    },
+                },
+                "required": ["game_id"],
             },
         ),
         types.Tool(
@@ -329,6 +343,46 @@ async def handle_call_tool(
                     text=f"No active games for {date}"
                 )
             ]
+    if name == "get-nhl-game-play-by-play":
+        game_id = arguments.get("game_id")
+
+        schedule_url = f"{NHL_API_BASE}/gamecenter/{game_id}/play-by-play"
+        async with httpx.AsyncClient() as client:
+            data = await make_nhl_request(client, schedule_url)
+
+        # Extract some key info
+        game_id = data.get('id')
+        away_team_info = data.get('awayTeam', {})
+        home_team_info = data.get('homeTeam', {})
+
+        away_name = away_team_info.get('commonName', {}).get('default', 'Unknown')
+        away_score = away_team_info.get('score', 'N/A')
+        home_name = home_team_info.get('commonName', {}).get('default', 'Unknown')
+        home_score = home_team_info.get('score', 'N/A')
+
+        output_str = ""
+        output_str += (f"Game ID: {game_id}\n")
+        output_str += (f"Away Team: {away_name} Score: {away_score}\n")
+        output_str += (f"Home Team: {home_name} Score: {home_score}\n")
+        output_str += (f"Game State: {data.get('gameState', 'N/A')}\n")
+        output_str += (f"Period: {data.get('displayPeriod', 'N/A')}\n")
+
+        # Print a few plays for demonstration
+        plays = data.get('plays', [])
+        output_str += ("\nFirst few plays of the game:\n")
+        for i, play in enumerate(plays[:5], start=1):
+            event_type = play.get('typeDescKey', 'Unknown')
+            time_in_period = play.get('timeInPeriod', 'N/A')
+            details = play.get('details', {})
+            output_str += (f"Play {i}: {event_type} at {time_in_period}, details: {details}\n")
+
+        # Return as types.TextContent
+        return [
+            types.TextContent(
+                type="text",
+                text=output_str
+            )
+        ]
     elif name == "get-nhl-roster":
         if not arguments:
             raise ValueError("Missing arguments")
