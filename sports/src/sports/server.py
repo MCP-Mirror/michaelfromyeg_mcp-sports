@@ -369,8 +369,8 @@ async def handle_call_tool(
 
         # Print a few plays for demonstration
         plays = data.get('plays', [])
-        output_str += ("\nFirst few plays of the game:\n")
-        for i, play in enumerate(plays[:5], start=1):
+        output_str += ("\All plays of the game:\n")
+        for i, play in enumerate(plays, start=1):
             event_type = play.get('typeDescKey', 'Unknown')
             time_in_period = play.get('timeInPeriod', 'N/A')
             details = play.get('details', {})
