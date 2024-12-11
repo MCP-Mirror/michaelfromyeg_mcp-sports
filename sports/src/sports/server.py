@@ -36,15 +36,6 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name="get-nhl-schedule-now",
-            description="Get NHL schedule for right now",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        ),
-        types.Tool(
             name="get-nhl-standings",
             description="Get NHL standings",
             inputSchema={
@@ -73,15 +64,70 @@ async def make_nhl_request(client: httpx.AsyncClient, url: str) -> dict[str, Any
 
 
 def format_games(games: list[dict]) -> str:
-    """Format a list of games into a concise string."""
+    """Format a list of games into a detailed string including venue, game state, scores, team info, clock, outcome, and goals."""
     games_str = ""
 
     for game in games:
-        home_team = game.get('homeTeam', {}).get('commonName', {}).get("default", "")
-        away_team = game.get('awayTeam', {}).get('commonName', {}).get("default", "")
-        venue = game.get('venue', {}).get('default', "")
-        games_str += f"{home_team} vs {away_team} at {venue}\n"
-    
+        # Basic info
+        game_id = game.get('id', 'N/A')
+        game_state = game.get('gameState', 'N/A')
+
+        # Venue
+        venue = game.get('venue', {}).get('default', 'Unknown Venue')
+
+        # Teams and Scores
+        home_team = game.get('homeTeam', {})
+        away_team = game.get('awayTeam', {})
+        home_team_name = home_team.get('name', {}).get('default', 'Unknown Team')
+        away_team_name = away_team.get('name', {}).get('default', 'Unknown Team')
+        home_team_score = home_team.get('score', 'N/A')
+        away_team_score = away_team.get('score', 'N/A')
+        home_team_id = home_team.get('id', 'N/A')
+        away_team_id = away_team.get('id', 'N/A')
+        home_team_logo = home_team.get('logo', '')
+        away_team_logo = away_team.get('logo', '')
+
+        # Clock
+        clock = game.get('clock', {})
+        time_remaining = clock.get('timeRemaining', 'N/A')
+        period = game.get('period', 'N/A')
+        in_intermission = clock.get('inIntermission', False)
+
+        # Game outcome
+        game_outcome = game.get('gameOutcome', {})
+        last_period_type = game_outcome.get('lastPeriodType', 'N/A')
+        ot_periods = game_outcome.get('otPeriods', 0)
+
+        # Goals
+        goals = game.get('goals', [])
+        goals_str = ""
+        for g in goals:
+            scorer_name = g.get('name', {}).get('default', 'Unknown Player')
+            period_num = g.get('periodDescriptor', {}).get('number', 'N/A')
+            period_type = g.get('periodDescriptor', {}).get('periodType', 'N/A')
+            goal_time = g.get('timeInPeriod', 'N/A')
+            goal_team = g.get('teamAbbrev', 'N/A')
+            goal_strength = g.get('strength', 'N/A')
+            away_score_during_goal = g.get('awayScore', 'N/A')
+            home_score_during_goal = g.get('homeScore', 'N/A')
+            goals_str += (
+                f" - {scorer_name} scored for {goal_team} in Period {period_num} "
+                f"({period_type}) at {goal_time} [{goal_strength}] "
+                f"(Score at that time: {away_score_during_goal}-{home_score_during_goal})\n"
+            )
+
+        # Construct the formatted string for each game
+        games_str += f"Game ID: {game_id}\n"
+        games_str += f"State: {game_state}\n"
+        games_str += f"Venue: {venue}\n"
+        games_str += f"Home Team: {home_team_name} (ID: {home_team_id}, Score: {home_team_score}, Logo: {home_team_logo})\n"
+        games_str += f"Away Team: {away_team_name} (ID: {away_team_id}, Score: {away_team_score}, Logo: {away_team_logo})\n"
+        games_str += f"Time Remaining: {time_remaining}, Period: {period}, In Intermission: {in_intermission}\n"
+        games_str += f"Game Outcome: Last Period Type: {last_period_type}, OT Periods: {ot_periods}\n"
+        if goals_str:
+            games_str += "Goals:\n" + goals_str
+        games_str += "\n"
+
     return games_str
 
 def format_standings(standings: dict) -> str:
