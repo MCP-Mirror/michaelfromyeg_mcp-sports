@@ -5,9 +5,11 @@ from mcp.server.models import InitializationOptions
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
+from datetime import datetime
 
-NWS_API_BASE = "https://api.weather.gov"
-USER_AGENT = "weather-app/1.0"
+NHL_API_BASE = "https://api-web.nhle.com/v1"
+# TODO(michaelfromyeg): make this legit!
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 # "sports", eventually actually make it sports
 server = Server("sports")
@@ -20,44 +22,35 @@ async def handle_list_tools() -> list[types.Tool]:
     """
     return [
         types.Tool(
-            name="get-alerts",
-            description="Get weather alerts for a state",
+            name="get-nhl-schedule",
+            description="Get NHL schedule for a date",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "state": {
+                    "date": {
                         "type": "string",
-                        "description": "Two-letter state code (e.g. CA, NY)",
+                        "description": "The date in YYYY-MM-DD format.",
                     },
                 },
-                "required": ["state"],
+                "required": ["date"],
             },
         ),
         types.Tool(
-            name="get-forecast",
-            description="Get weather forecast for a location",
+            name="get-nhl-standings",
+            description="Get NHL standings",
             inputSchema={
                 "type": "object",
-                "properties": {
-                    "latitude": {
-                        "type": "number",
-                        "description": "Latitude of the location",
-                    },
-                    "longitude": {
-                        "type": "number",
-                        "description": "Longitude of the location",
-                    },
-                },
-                "required": ["latitude", "longitude"],
+                "properties": {},
+                "required": [],
             },
         ),
     ]
 
-async def make_nws_request(client: httpx.AsyncClient, url: str) -> dict[str, Any] | None:
-    """Make a request to the NWS API with proper error handling."""
+async def make_nhl_request(client: httpx.AsyncClient, url: str) -> dict[str, Any] | None:
+    """Make a request to the NHL API with proper error handling."""
     headers = {
         "User-Agent": USER_AGENT,
-        "Accept": "application/geo+json"
+        "Accept": "application/json"
     }
 
     try:
@@ -67,17 +60,39 @@ async def make_nws_request(client: httpx.AsyncClient, url: str) -> dict[str, Any
     except Exception:
         return None
 
-def format_alert(feature: dict) -> str:
-    """Format an alert feature into a concise string."""
-    props = feature["properties"]
-    return (
-        f"Event: {props.get('event', 'Unknown')}\n"
-        f"Area: {props.get('areaDesc', 'Unknown')}\n"
-        f"Severity: {props.get('severity', 'Unknown')}\n"
-        f"Status: {props.get('status', 'Unknown')}\n"
-        f"Headline: {props.get('headline', 'No headline')}\n"
-        "---"
+def format_games(games: list[dict]) -> str:
+    """Format a list of games into a concise string."""
+    games_str = ""
+
+    for game in games:
+        home_team = game.get('homeTeam', {}).get('commonName', {}).get("default", "")
+        away_team = game.get('awayTeam', {}).get('commonName', {}).get("default", "")
+        venue = game.get('venue', {}).get('default', "")
+        games_str += f"{home_team} vs {away_team} at {venue}\n"
+    
+    return games_str
+
+def format_standings(standings: dict) -> str:
+    """Format NHL standings into a concise string."""
+    standings_str = ""
+    
+    # Sort standings by points and goal differential as tiebreaker
+    sorted_standings = sorted(
+        standings.get("standings", []),
+        key=lambda x: (x.get("points", 0), x.get("goalDifferential", 0)),
+        reverse=True
     )
+
+    for team in sorted_standings:
+        team_name = team.get("teamCommonName", {}).get("default", "")
+        points = team.get("points", 0)
+        wins = team.get("wins", 0)
+        losses = team.get("losses", 0)
+        ot_losses = team.get("otLosses", 0)
+        goal_diff = team.get("goalDifferential", 0)
+        
+        standings_str += f"{team_name}: {points}pts ({wins}-{losses}-{ot_losses}) GD: {goal_diff:+d}\n"
+    return standings_str
 
 @server.call_tool()
 async def handle_call_tool(
@@ -85,105 +100,64 @@ async def handle_call_tool(
 ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """
     Handle tool execution requests.
-    Tools can fetch weather data and notify clients of changes.
+    Tools can fetch sports data and notify clients of changes.
     """
-    if not arguments:
-        raise ValueError("Missing arguments")
-  
-    if name == "get-alerts":
-        state = arguments.get("state")
-        if not state:
+    if name == "get-nhl-schedule":
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        date = arguments.get("date")
+        if not date:
             raise ValueError("Missing state parameter")
 
-        # Convert state to uppercase to ensure consistent format
-        state = state.upper()
-        if len(state) != 2:
-            raise ValueError("State must be a two-letter code (e.g. CA, NY)")
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Invalid date format. Please use YYYY-MM-DD.")
 
         async with httpx.AsyncClient() as client:
-            alerts_url = f"{NWS_API_BASE}/alerts?area={state}"
-            alerts_data = await make_nws_request(client, alerts_url)
+            schedule_url = f"{NHL_API_BASE}/schedule/{date}"
+            schedule_data = await make_nhl_request(client, schedule_url)
 
-            if not alerts_data:
+            if not schedule_data:
                 return [types.TextContent(type="text", text="Failed to retrieve alerts data")]
 
-            features = alerts_data.get("features", [])
-            if not features:
-                return [types.TextContent(type="text", text=f"No active alerts for {state}")]
+            game_days = schedule_data.get("gameWeek", [])
+            if not game_days:
+                return [types.TextContent(type="text", text=f"No active games for {date}")]
 
-            # Format each alert into a concise string
-            formatted_alerts = [format_alert(feature) for feature in features[:20]] # only take the first 20 alerts
-            alerts_text = f"Active alerts for {state}:\n\n" + "\n".join(formatted_alerts)
+            for game_day in game_days:
+                if game_day.get("date", "") == date:
+                    games = game_day.get("games", [])
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=format_games(games)
+                        )
+                    ]
 
             return [
                 types.TextContent(
                     type="text",
-                    text=alerts_text
+                    text=f"No active games for {date}"
                 )
             ]
-    elif name == "get-forecast":
-        try:
-            latitude = float(arguments.get("latitude"))
-            longitude = float(arguments.get("longitude"))
-        except (TypeError, ValueError):
-            return [types.TextContent(
-                type="text",
-                text="Invalid coordinates. Please provide valid numbers for latitude and longitude."
-            )]
-            
-        # Basic coordinate validation
-        if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
-            return [types.TextContent(
-                type="text",
-                text="Invalid coordinates. Latitude must be between -90 and 90, longitude between -180 and 180."
-            )]
-
+    elif name == "get-nhl-standings":
         async with httpx.AsyncClient() as client:
-            # First get the grid point
-            lat_str = f"{latitude}"
-            lon_str = f"{longitude}"
-            points_url = f"{NWS_API_BASE}/points/{lat_str},{lon_str}"
-            points_data = await make_nws_request(client, points_url)
+            standings_url = f"{NHL_API_BASE}/standings/now"
+            standings_data = await make_nhl_request(client, standings_url)
 
-            if not points_data:
-                return [types.TextContent(type="text", text=f"Failed to retrieve grid point data for coordinates: {latitude}, {longitude}. This location may not be supported by the NWS API (only US locations are supported).")]
+            print("standings_data", standings_data)
 
-            # Extract forecast URL from the response
-            properties = points_data.get("properties", {})
-            forecast_url = properties.get("forecast")
-            
-            if not forecast_url:
-                return [types.TextContent(type="text", text="Failed to get forecast URL from grid point data")]
+            if not standings_data:
+                return [types.TextContent(type="text", text="Failed to retrieve standings data")]
 
-            # Get the forecast
-            forecast_data = await make_nws_request(client, forecast_url)
-            
-            if not forecast_data:
-                return [types.TextContent(type="text", text="Failed to retrieve forecast data")]
-
-            # Format the forecast periods
-            periods = forecast_data.get("properties", {}).get("periods", [])
-            if not periods:
-                return [types.TextContent(type="text", text="No forecast periods available")]
-
-            # Format each period into a concise string
-            formatted_forecast = []
-            for period in periods:
-                forecast_text = (
-                    f"{period.get('name', 'Unknown')}:\n"
-                    f"Temperature: {period.get('temperature', 'Unknown')}°{period.get('temperatureUnit', 'F')}\n"
-                    f"Wind: {period.get('windSpeed', 'Unknown')} {period.get('windDirection', '')}\n"
-                    f"{period.get('shortForecast', 'No forecast available')}\n"
-                    "---"
+            return [
+                types.TextContent(
+                    type="text",
+                    text=format_standings(standings_data)
                 )
-                formatted_forecast.append(forecast_text)
-
-            forecast_text = f"Forecast for {latitude}, {longitude}:\n\n" + "\n".join(formatted_forecast)
-
-            return [types.TextContent(
-                type="text",
-                text=forecast_text
-            )]
+            ]
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -194,7 +168,7 @@ async def main():
             read_stream,
             write_stream,
             InitializationOptions(
-                server_name="weather",
+                server_name="sports",
                 server_version="0.1.0",
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
@@ -203,6 +177,5 @@ async def main():
             ),
         )
 
-# This is needed if you'd like to connect to a custom client
 if __name__ == "__main__":
     asyncio.run(main())
