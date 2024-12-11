@@ -13,6 +13,12 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # "sports", eventually actually make it sports
 server = Server("sports")
+# server.set_logging_level("debug")
+
+# server.request_context.session.send_log_message(
+#     level="info",
+#     data="Server started successfully",
+# )
 
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
@@ -56,6 +62,7 @@ async def make_nhl_request(client: httpx.AsyncClient, url: str) -> dict[str, Any
     try:
         response = await client.get(url, headers=headers, timeout=30.0)
         response.raise_for_status()
+        print("response", response)
         return response.json()
     except Exception:
         return None
@@ -148,6 +155,10 @@ async def handle_call_tool(
             standings_data = await make_nhl_request(client, standings_url)
 
             print("standings_data", standings_data)
+            server.request_context.session.send_log_message(
+                level="info",
+                data=f"standings_data: {standings_data}",
+            )
 
             if not standings_data:
                 return [types.TextContent(type="text", text="Failed to retrieve standings data")]
@@ -163,6 +174,7 @@ async def handle_call_tool(
 
 async def main():
     # Run the server using stdin/stdout streams
+    print("Running sports MCP server...")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
