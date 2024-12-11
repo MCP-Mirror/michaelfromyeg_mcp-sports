@@ -2,6 +2,6 @@
 
 npx @modelcontextprotocol/inspector \
     uv \
-    --directory /Users/mdemarco/code/mcp-sports/sports \
+    --directory "$1" \
     run \
-    sports
+    server
